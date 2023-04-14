@@ -2,12 +2,12 @@
   (:require [clj-http.client :as http]
             [clojure.data.json :as json]
             [clojure.data.xml :as xml]
-            [clojure.java.shell :as shell]
             [clojure.java.io :as io]
             [next.jdbc :as jdbc]
             [honey.sql :as sql]
             [ring.adapter.jetty :as jetty]
-            [clojure.tools.logging :as log :refer :all])
+            [clojure.tools.logging :as log :refer :all]
+            [su.msk.xtalk.wp2ff.tools :as tools])
   (:import [java.io File])
   (:gen-class))
 
@@ -116,12 +116,6 @@
        (map cache-locally)
        (remove nil?)))
 
-(defn html2text [html]
-  (-> (shell/sh "pandoc" "-r" "html" "-w" "plain" :in html)
-      (get :out)
-      ;; Pandoc leaves brackets as an image placeholders
-      (clojure.string/replace #"\n\[\]\n" "")))
-
 (defn map-tags [tags]
   (->> tags
        (map #(get (*cfg* :cat-hash) %))
@@ -139,14 +133,15 @@
   (.contains (map clojure.string/lower-case (post :tags)) "freefeed"))
 
 (defn parse-feed [xml-string]
-  ;;(spit "/tmp/feed.xml" xml-string)
+  (spit "/tmp/feed.xml" xml-string)
   (let [xml (xml-seq (xml/parse-str xml-string))]
     (for [item xml :when (= (get item :tag) :item)]
       (let [content (get item :content)
             link (get-content content :link)
             tags (get-contents content :category)
-            text (html2text (get-content content :encoded))
+            text (tools/html->text (get-content content :encoded))
             imgs (get-post-images content :content)]
+        (log/debug "Parsed text:" text)
         (let [post {:link link
                     :text text
                     :tags tags

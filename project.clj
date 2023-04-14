@@ -17,7 +17,8 @@
                                                     javax.jms/jms
                                                     com.sun.jmdk/jmxtools
                                                     com.sun.jmx/jmxri]]
-                 [ring "1.10.0"]]
+                 [ring "1.10.0"]
+                 [org.clj-commons/hickory "0.7.3"]]
   :main ^:skip-aot su.msk.xtalk.wp2ff.core
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all

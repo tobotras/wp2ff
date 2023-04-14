@@ -4,8 +4,8 @@ Reads recent posts from Wordpress RSS feed. Posts in category "FreeFeed" are rep
 
 ## Installation
 
-Install Clojure and Leiningen. Clone repository from https://github.com/tobotras/wp2ff/. Run "lein uberjar",
-compiled program is found at target/uberjar/wp2ff-0.1.0-SNAPSHOT-standalone.jar
+Install Clojure and Leiningen. Run "lein uberjar", compiled program is found at
+target/uberjar/wp2ff-0.1.0-SNAPSHOT-standalone.jar
 
 ## Usage
 
@@ -31,13 +31,9 @@ WP_SLEEP (seconds between polls)
 
 Obvious
 
-### Bugs
+## Bugs
 
 This might accidentally post a ton of junk into your FreeFeed account. Beware.
-
-### Any Other Sections
-### That You Think
-### Might be Useful
 
 ## License
 
