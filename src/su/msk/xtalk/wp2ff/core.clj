@@ -26,10 +26,11 @@
     (if (= (res :status) 200)
       (do
         (data/inc-state :ff_sessions)
+        (data/logf :debug "Created new FF session")
         {:token (body "authToken")})
       (do
-        (data/inc-state :ff_errors)
-        (log/error "Login failed:" (body "err"))
+        (data/inc-state :ff_errors)       
+        (data/logf :error "FF login failed: %s" (body "err"))
         nil))))
 
 (defn create-attachment [session filename]
@@ -45,11 +46,10 @@
         (get-in (json/read-str (res :body)) ["attachments" "id"]))        
       (do
         (data/inc-state :ff_errors)
-        (log/error "Cannot create attachment:" ((res :body) "err"))
+        (data/logf :error "Cannot create attachment: %s" ((res :body) "err"))
         nil))))
 
 (defn do-post [session post]
-  "Returns post link on success, nil otherwise"
   (log/info "Posting to FreeFeed, entry:" (post :link))
   (let [attachments (mapv #(create-attachment session %) (post :imgs))
         feed (*cfg* :ff-user)
@@ -66,12 +66,12 @@
     (if (= (res :status) 200)
       (do
         (data/inc-state :ff_posts)
-        (log/info "Post succeeded")
-        (post :link))
+        (data/logf :info "Posted %s to FF" (post :link))
+        :posted)
       (do
         (data/inc-state :ff_errors)
-        (log/error "Post failed:" ((res :body) "err"))
-        nil))))
+        (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err"))
+        :failed))))
 
 (defn get-elements [item tag]
   (filter #(= (get % :tag) tag) item))
@@ -119,10 +119,10 @@
        (map #(get (*cfg* :cat-hash) %))
        (remove nil?)))
 
-(defn footer [link tags]
+(defn footer [post]
   (format "Fed from !%s\n%s\n"
-          link
-          (->> tags
+          (post :link)
+          (->> (post :tags)
                (cons "wordpress")
                (map #(str "#" %))
                (clojure.string/join ", "))))
@@ -142,13 +142,13 @@
             post {:tags tags
                   :link link}]
         (when (post-eligible? post)
-          (let [text (str (tools/html->text (get-content content :encoded))
+          (let [post (assoc post :tags (map-tags tags))
+                text (str (tools/html->text (get-content content :encoded))
                           "\n\n"
-                          (footer link tags))]
+                          (footer post))]
             (log/debug "Text to be posted:" text)
             (merge post
-                   {:tags (map-tags tags)
-                    :imgs (get-post-images content :content)
+                   {:imgs (get-post-images content :content)
                     :text text})))))))
 
 (defn wp-feed []
@@ -156,12 +156,17 @@
   (let [res (http/get (*cfg* :RSS)
                       {:throw-exceptions false})]
     (if (= (res :status) 200)
-      (do
+      (let [entries (parse-feed (res :body))
+            new-entries (remove nil? entries)]
         (data/inc-state :wp_sessions)
-        (remove nil? (parse-feed (res :body))))
+        (data/logf :debug "Fetched %d entries, %d old, %d new"
+                     (count entries)
+                     (count (remove #(not (nil? %)) entries))
+                     (count new-entries))
+        new-entries)
       (do
         (data/inc-state :wp_errors)
-        (log/error "Cannot get WP feed:" (res :reason-phrase))
+        (data/logf :error "Cannot fetch WP feed: %s" (res :reason-phrase))
         nil))))
 
 (defn cleanup [post]
@@ -188,13 +193,12 @@
               :user     (tools/env "DB_USER" "wp2ff")
               :password (tools/env "DB_PASS" "wp2ffpass")}))
   
-
 (defn process-post [session post]
   (let [result (when-let [post-result (do-post session post)]
                  (data/mark-seen post)
                  post-result)]
     (cleanup post)
-    result))
+    (assoc post :state result)))
 
 (defn wp-to-ff [params]
   "Called from GAE cron job"
@@ -206,11 +210,11 @@
         (if (some nil? processed-posts)
           {:status 500
            :body "Some post processing error occured, sorry"}
-          {:status 200
-           :body (if (not-empty processed-posts)
-                   (str "New entries posted: "
-                        (clojure.string/join ", " processed-posts))
-                   "No new entries posted")})))
+          (if (not-empty processed-posts)
+            {:status 201
+             :body (str "New entries posted: " (clojure.string/join ", " processed-posts))}
+            {:status 204
+             :body "No new entries posted")})))
     {:status 500
      :body "Cannot establish FreeFeed session"}))
 
