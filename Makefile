@@ -1,6 +1,8 @@
 jar = target/uberjar/wp2ff-0.1.0-SNAPSHOT-standalone.jar
 
-$(jar): project.clj test/su/msk/xtalk/wp2ff/core_test.clj resources/log4j.properties src/su/msk/xtalk/wp2ff/core.clj
+JAR: $(jar)
+
+$(jar): project.clj test/su/msk/xtalk/wp2ff/*.clj resources/log4j.properties src/su/msk/xtalk/wp2ff/*.clj
 	lein uberjar
 
 deploy: $(jar)

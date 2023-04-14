@@ -41,3 +41,17 @@
        (mapv item->text)
        (clojure.string/join "")))
   
+(defn env [var & [default]]
+  (if-let [value (System/getenv var)]
+    (if (number? default)
+      (Integer/parseUnsignedInt value)
+      value)
+    default))
+
+(def state (atom {}))
+
+(defn inc-state [key]
+  (swap! state
+         #(update % key
+                  (fn [value]
+                    (inc (or value 0))))))

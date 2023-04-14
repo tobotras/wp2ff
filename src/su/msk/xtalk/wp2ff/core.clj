@@ -5,9 +5,9 @@
             [clojure.java.io :as io]
             [next.jdbc :as jdbc]
             [honey.sql :as sql]
-            [ring.adapter.jetty :as jetty]
             [clojure.tools.logging :as log :refer :all]
-            [su.msk.xtalk.wp2ff.tools :as tools])
+            [su.msk.xtalk.wp2ff.tools :as tools]
+            [su.msk.xtalk.wp2ff.service :as service])
   (:import [java.io File])
   (:gen-class))
 
@@ -26,8 +26,11 @@
                         :throw-exceptions false})
         body (json/read-str (res :body))]
     (if (= (res :status) 200)
-      {:token (body "authToken")}
       (do
+        (tools/inc-state :ff-sessions)
+        {:token (body "authToken")})
+      (do
+        (tools/inc-state :ff-errors)
         (log/error "Login failed:" (body "err"))
         nil))))
 
@@ -39,8 +42,11 @@
                         :multipart [{:name "file"
                                      :content (clojure.java.io/file filename)}]})]
     (if (= (res :status) 200)
-      (get-in (json/read-str (res :body)) ["attachments" "id"])
       (do
+        (tools/inc-state :ff-images)
+        (get-in (json/read-str (res :body)) ["attachments" "id"]))        
+      (do
+        (tools/inc-state :ff-errors)
         (log/error "Cannot create attachment:" ((res :body) "err"))
         nil))))
 
@@ -58,11 +64,18 @@
                         :accept :json
                         :headers {"Authorization" (str "Bearer " token)}
                         :body (json/write-str req)})]
-    (when-not (= (res :status) 200)
-      (log/error "Post failed:" ((res :body) "err"))))
-  (log/info "Post succeeded"))
+    (if (= (res :status) 200)
+      (do
+        (tools/inc-state :ff-posts)
+        (log/info "Post succeeded")
+        :success)
+      (do
+        (tools/inc-state :ff-errors)
+        (log/error "Post failed:" ((res :body) "err"))
+        nil))))
 
 (defn sql! [request]
+  ;;(log/debug "Executing request, datasource is " (with-out-str (clojure.pprint/pprint (*cfg* :db-config))))
   (jdbc/execute! (*cfg* :db-config) (sql/format request)))
 
 (defn mark-seen [post]
@@ -74,6 +87,9 @@
 
 (defn seen-post? [post]
   (seq (sql! {:select [:*] :from :seen :where [:= :link (post :link)]})))
+
+(defn seen-total []
+  ((first (sql! {:select :%count.* :from :seen})) :count))
 
 (defn get-elements [item tag]
   (filter #(= (get % :tag) tag) item))
@@ -121,42 +137,44 @@
        (map #(get (*cfg* :cat-hash) %))
        (remove nil?)))
 
-(defn footer [post]
+(defn footer [link tags]
   (format "Fed from !%s\n%s\n"
-          (post :link)
-          (->> (post :tags)
+          link
+          (->> tags
                (cons "wordpress")
                (map #(str "#" %))
                (clojure.string/join ", "))))
 
-(defn post-eligible? [post]
-  (.contains (map clojure.string/lower-case (post :tags)) "freefeed"))
+(defn tags-eligible? [tags]
+  (.contains (map clojure.string/lower-case tags) "freefeed"))
 
 (defn parse-feed [xml-string]
-  (spit "/tmp/feed.xml" xml-string)
+  ;;(spit "/tmp/feed.xml" xml-string)
   (let [xml (xml-seq (xml/parse-str xml-string))]
     (for [item xml :when (= (get item :tag) :item)]
-      (let [content (get item :content)
-            link (get-content content :link)
-            tags (get-contents content :category)
-            text (tools/html->text (get-content content :encoded))
-            imgs (get-post-images content :content)]
-        (log/debug "Parsed text:" text)
-        (let [post {:link link
-                    :text text
-                    :tags tags
-                    :images imgs}]
-          (when (post-eligible? post)
-            (let [tagged-post (assoc post :tags (map-tags (post :tags)))]
-              (assoc post :text (str (post :text) "\n\n" (footer tagged-post))))))))))
+      (let [tags (get-contents content :category)]
+        (when (tags-eligible? tags)
+          (let [content (get item :content)
+                link (get-content content :link)
+                text (str (tools/html->text (get-content content :encoded))
+                          "\n\n"
+                          (footer link tags))]
+            (log/debug "Text to be posted:" text)
+            {:link link
+             :tags (map-tags tags)
+             :imgs (get-post-images content :content)
+             :text text}))))))
 
 (defn wp-feed []
   (log/info "Fetching Wordpress feed...")
   (let [res (http/get (*cfg* :RSS)
                       {:throw-exceptions false})]
     (if (= (res :status) 200)
-      (remove nil? (parse-feed (res :body)))
       (do
+        (tools/inc-state :wp-sessions)
+        (remove nil? (parse-feed (res :body))))
+      (do
+        (tools/inc-state :wp-errors)
         (log/error "Cannot get WP feed:" (res :reason-phrase))
         nil))))
 
@@ -165,13 +183,10 @@
    (for [image (post :images)]
      (io/delete-file image))))
 
-(defn env [var & [default]]
-  (or (System/getenv var) default))
-
 (defn configure []
-  (let [wp-user (env "WP_USER")
-        ff-user (env "FF_USER")
-        ff-pass (env "FF_PASS")]
+  (let [wp-user (tools/env "WP_USER")
+        ff-user (tools/env "FF_USER")
+        ff-pass (tools/env "FF_PASS")]
     (when (some nil? [wp-user ff-user ff-pass])
       (log/error "Environment not set")
       (System/exit 1))
@@ -182,13 +197,12 @@
               :ff-user ff-user
               :ff-pass ff-pass
               :db-config {:dbtype "postgresql"
-                          :dbname   (env "DB_NAME" "wp2ff")
-                          :host     (env "DB_HOST" "localhost")
-                          :user     (env "DB_USER" "wp2ff")
-                          :password (env "DB_PASS" "wp2ffpass")}
-              :sleep (* 1000 (if-let [secs (env "WP_SLEEP")]
-                               (Integer/parseUnsignedInt secs)
-                               (*cfg* :default-sleep)))}))))
+                          :dbname   (tools/env "DB_NAME" "wp2ff")
+                          :host     (tools/env "DB_HOST" "localhost")
+                          :user     (tools/env "DB_USER" "wp2ff")
+                          :password (tools/env "DB_PASS" "wp2ffpass")}
+              :sleep (* 1000 (tools/env "WP_SLEEP" (*cfg* :default-sleep)))})))
+  (swap! tools/state (fn [_] {:seen (seen-total)})))
   
 (defn wp-to-ff []
   (log/info "Next pass started")
@@ -198,27 +212,15 @@
        (if (seen-post? post)
          (log/debug "Skipping seen" (post :link))
          (do
-           (do-post session post)
-           (mark-seen post)
+           (when (do-post session post)
+             (mark-seen post))
            (cleanup post)))))
     (log/info "Pass done")))
-
-(defn handler [req] 
-  {:status  200
-   :headers {"Content-Type" "text/html"}
-   :body    "<html><p>Hello there!<p>I'll put some status here, I promise."})
-
-(defn start-web-service []
-  (jetty/run-jetty handler
-                   {:port (if-let [port (env "PORT")]
-                            (Integer/parseUnsignedInt port)
-                            (*cfg* :default-port))
-                    :join? false}))
 
 (defn -main [& args]
   (log/info "wp2ff v0.1, tobotras@gmail.com")
   (configure)
-  (start-web-service)
+  (service/start-web-service *cfg*)
   (log/debug "Set everything, looping")
   (loop []
     (wp-to-ff)

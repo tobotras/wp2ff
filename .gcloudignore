@@ -22,3 +22,6 @@ Makefile
 
 # Target directory for maven builds
 target/
+
+.*
+#*
