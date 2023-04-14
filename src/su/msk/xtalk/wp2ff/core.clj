@@ -214,7 +214,7 @@
             {:status 201
              :body (str "New entries posted: " (clojure.string/join ", " processed-posts))}
             {:status 204
-             :body "No new entries posted")})))
+             :body "No new entries posted"}))))
     {:status 500
      :body "Cannot establish FreeFeed session"}))
 
