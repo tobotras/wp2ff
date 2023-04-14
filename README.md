@@ -29,7 +29,16 @@ WP_SLEEP (seconds between polls)
 
 ## Examples
 
-Obvious
+To deploy into GAE use app.yaml like this:
+
+    runtime: java17
+    env: standard
+    env_variables:
+      WP_USER: "username"
+      FF_USER: "username"
+      FF_PASS: "password"
+      WP_SLEEP: 3600
+    entrypoint: java -Xmx64m -jar wp2ff-0.1.0-SNAPSHOT-standalone.jar
 
 ## Bugs
 

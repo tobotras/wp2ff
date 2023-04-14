@@ -13,5 +13,12 @@
 .git
 .gitignore
 
+# Source code (deploying JAR only)
+src/
+resources/
+test/
+*.clj
+Makefile
+
 # Target directory for maven builds
 target/
