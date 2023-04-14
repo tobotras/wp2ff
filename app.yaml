@@ -1,0 +1,6 @@
+runtime: java17
+env: standard
+env_variables:
+  WP_USER: "tobotras"
+  FF_USER: "tobotras"
+entrypoint: java -Xmx64m -jar wp2ff-0.1.0-SNAPSHOT-standalone.jar
