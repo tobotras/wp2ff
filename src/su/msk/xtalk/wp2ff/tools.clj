@@ -2,6 +2,8 @@
   (:require [hickory.core :as hickory])
   (:gen-class))
 
+;; CONVERT state to DB
+
 (defn content [elt]
   "Element is a vector: tag, attributes, content..."
   (subvec elt 2))
@@ -47,11 +49,3 @@
       (Integer/parseUnsignedInt value)
       value)
     default))
-
-(def state (atom {}))
-
-(defn inc-state [key]
-  (swap! state
-         #(update % key
-                  (fn [value]
-                    (inc (or value 0))))))

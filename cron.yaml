@@ -1,0 +1,4 @@
+cron:
+- description: "Wordpress poll"
+  url: /wp-poll
+  schedule: every 1 minute
