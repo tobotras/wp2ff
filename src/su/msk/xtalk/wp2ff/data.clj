@@ -37,8 +37,8 @@
   ((first (sql! {:select :%count.* :from :seen})) :count))
 
 (defn category->hashtag [category]
-  (if-let [mapping (first (sql! {:select :ff_hashtag :from :categories :where [:= :wp_category category]}))]
-    (mapping :categories/ff_hashtag)))
+  (when-let [{tag :categories/ff_hashtag} (first (sql! {:select :ff_hashtag :from :categories :where [:= :wp_category category]}))]
+    tag))
 
 (defn logf [severity text & params]
   (let [message (apply format text params)]
