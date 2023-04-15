@@ -22,16 +22,10 @@
                        {:form-params {:username (*cfg* :ff-user)
                                       :password (*cfg* :ff-pass)}
                         :throw-exceptions false})
-        body (json/read-str (res :body))
-        success? (= (res :status) 200)]        
-    (data/inc-state (if success? :ff_sessions :ff_errors))
-    (if success?
-      (do
-        (data/logf :debug "Created new FF session")
-        {:token (body "authToken")})
-      (do
-        (data/logf :error "FF login failed: %s" (body "err"))
-        nil))))
+        body (json/read-str (res :body))]
+    (if (= (res :status) 200)
+      [{:token (body "authToken")} nil]
+      [nil (body "err")])))
 
 (defn create-attachment [session filename]
   (let [token (session :token)
@@ -39,36 +33,38 @@
                        {:headers {"Authorization" (str "Bearer " token)}
                         :throw-exceptions false
                         :multipart [{:name "file"
-                                     :content (clojure.java.io/file filename)}]})
-        success? (= (res :status) 200)]
-    (data/inc-state (if success? :ff_images :ff_errors))
-    (if success?
-      (get-in (json/read-str (res :body)) ["attachments" "id"])
+                                     :content (clojure.java.io/file filename)}]})]
+    (if (= (res :status) 200)
       (do
+        (data/inc-state :ff_images)
+        (get-in (json/read-str (res :body)) ["attachments" "id"]))
+      (do
+        (data/inc-state :ff_errors)
         (data/logf :error "Cannot create attachment: %s" ((res :body) "err"))
         nil))))
 
 (defn do-post [session post]
   (log/info "Posting to FreeFeed, entry:" (post :link))
-  (let [attachments (mapv #(create-attachment session %) (post :imgs))
-        feed (*cfg* :ff-user)
-        req {:post {:body (post :text)
-                    :attachments attachments}
-             :meta {:feeds feed}}
-        token (session :token)
-        res (http/post (str (*cfg* :api.root) "/v1/posts")
-                       {:content-type :json
-                        :throw-exceptions false
-                        :accept :json
-                        :headers {"Authorization" (str "Bearer " token)}
-                        :body (json/write-str req)})
-        success? (= (res :status) 200)]
-    (data/inc-state (if success? :ff_posts :ff_errors))
-    (if success?
-      (data/logf :info "Posted %s to FF" (post :link))
-      (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err")))
-    success?))
-
+  (let [attachments (mapv #(create-attachment session %) (post :imgs))]
+    (when-not (some nil? attachments)
+      (let [feed (*cfg* :ff-user)
+            req {:post {:body (post :text)
+                        :attachments attachments}
+                 :meta {:feeds feed}}
+            token (session :token)
+            res (http/post (str (*cfg* :api.root) "/v1/posts")
+                           {:content-type :json
+                            :throw-exceptions false
+                            :accept :json
+                            :headers {"Authorization" (str "Bearer " token)}
+                            :body (json/write-str req)})
+            success? (= (res :status) 200)]
+        (data/inc-state (if success? :ff_posts :ff_errors))
+        (if success?
+          (data/logf :info "Posted %s to FF" (post :link))
+          (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err")))
+        success?))))
+    
 (defn get-elements [item tag]
   (filter #(= (get % :tag) tag) item))
 
@@ -199,22 +195,29 @@
 (defn wp-to-ff [params]
   "Called from GAE cron job"
   (log/info "Next pass started, params:" (with-out-str (clojure.pprint/pprint params)))
-  (if-let [session (create-session)]
-    (let [processed-posts (map #(process-post session %) (wp-feed))
-          failed-posts (remove #(get % :state) processed-posts)
-          done-posts (vec (cset/difference (set processed-posts) (set failed-posts)))
-          status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
-      {:status status
-       :body (if (empty? processed-posts)
-               "No posts to process"
-               (str (when-not (empty? done-posts)
-                      (format "Posted %d posts: %s\n" (count done-posts)
-                              (clojure.string/join ", " (map #(get % :link) done-posts))))
-                    (when-not (empty? failed-posts)
-                      (format "Failed %d posts: %s\n" (count failed-posts)
-                              (clojure.string/join ", " (map #(get % :link) failed-posts))))))})
-    {:status 500
-     :body "Cannot establish FreeFeed session"}))
+  (let [[session err] (create-session)]
+    (if session
+      (do
+        (data/inc-state :ff_sessions)
+        (data/logf :debug "Created new FF session")
+        (let [processed-posts (map #(process-post session %) (wp-feed))
+              failed-posts (remove #(get % :state) processed-posts)
+              done-posts (vec (cset/difference (set processed-posts) (set failed-posts)))
+              status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
+          {:status status
+           :body (if (empty? processed-posts)
+                   "No posts to process"
+                   (str (when-not (empty? done-posts)
+                          (format "Posted %d posts: %s\n" (count done-posts)
+                                  (clojure.string/join ", " (map #(get % :link) done-posts))))
+                        (when-not (empty? failed-posts)
+                          (format "Failed %d posts: %s\n" (count failed-posts)
+                                  (clojure.string/join ", " (map #(get % :link) failed-posts))))))}))
+      (do
+        (data/inc-state :ff_errors)
+        (data/logf :error "FF login failed: %s" err)
+        {:status 500
+         :body "Cannot establish FreeFeed session"}))))
 
 (defn -main [& args]
   (log/info "wp2ff v0.1, tobotras@gmail.com")

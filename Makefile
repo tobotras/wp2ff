@@ -7,5 +7,4 @@ $(jar): project.clj test/su/msk/xtalk/wp2ff/*.clj resources/log4j.properties src
 
 deploy: $(jar)
 	cp $(jar) .
-	gcloud app deploy app.yaml
-	gcloud app deploy cron.yaml
+	yes | (gcloud app deploy app.yaml; gcloud app deploy cron.yaml)

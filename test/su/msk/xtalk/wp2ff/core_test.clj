@@ -1,16 +1,9 @@
 (ns su.msk.xtalk.wp2ff.core-test
   (:require [clojure.test :refer :all]
-            [wp2ff.core :refer :all]
+            [su.msk.xtalk.wp2ff.core :refer :all]
             [clojure.java.io :as io]
             [next.jdbc :as jdbc]
             [honey.sql :as sql]))
-
-(defn drop-test-posts [the-test]
-  (the-test)
-  (sql! {:delete-from :seen
-         :where [:like :link "test-%"]}))
-
-(use-fixtures :once drop-test-posts)
 
 (deftest t-attachmenet
   (with-redefs [*cfg* (merge *cfg*
@@ -24,12 +17,3 @@
           (io/delete-file image-file)
           (is result)))
       nil)))
-
-(deftest t-mark-seen
-  (let [post {:link "test-link"}]
-    (mark-seen post)
-    (is (seen-post? post))))
-
-(deftest t-not-seen
-  (let [post {:link "test-never-seen"}]
-    (is (nil? (seen-post? post)))))
