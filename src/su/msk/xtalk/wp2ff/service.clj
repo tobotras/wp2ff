@@ -13,7 +13,7 @@
    :headers {"Content-Type" "text/html"}
    :body    (str
              "<html><body>\n"
-             "   <h2>Hello there!</h2>\n" (tools/env "GOOGLE_CLOUD_PROJECT") ", version " (tools/env "GAE_VERSION") "here."
+             "   <h2>Hello there!</h2>\n" (tools/env "GOOGLE_CLOUD_PROJECT") ", version " (tools/env "GAE_VERSION") " here."
              "   <p>Request was:<br><pre>" (with-out-str (clojure.pprint/pprint request)) "</pre></p>\n"
              "   <p>State:<br><pre>" (with-out-str (clojure.pprint/pprint (data/get-state))) "</pre></p>\n"
              "</html>")})

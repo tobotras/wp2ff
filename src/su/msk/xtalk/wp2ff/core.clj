@@ -4,6 +4,7 @@
             [clojure.data.xml :as xml]
             [clojure.java.io :as io]
             [clojure.tools.logging :as log :refer :all]
+            [clojure.set :as cset]
             [su.msk.xtalk.wp2ff.tools :as tools]
             [su.msk.xtalk.wp2ff.data :as data]
             [su.msk.xtalk.wp2ff.service :as service])
@@ -12,7 +13,8 @@
 
 (def ^:dynamic *cfg*
   {:api.root      "https://freefeed.net/"
-   :cat-hash      {"House" "домострой"}
+   :cat-hash      {"House" "домострой"
+                   "Work" "рабочее"}
    :default-port  8080})
 
 (defn create-session []
@@ -22,14 +24,14 @@
                        {:form-params {:username (*cfg* :ff-user)
                                       :password (*cfg* :ff-pass)}
                         :throw-exceptions false})
-        body (json/read-str (res :body))]
-    (if (= (res :status) 200)
+        body (json/read-str (res :body))
+        success? (= (res :status) 200)]        
+    (data/inc-state (if success? :ff_sessions :ff_errors))
+    (if success?
       (do
-        (data/inc-state :ff_sessions)
         (data/logf :debug "Created new FF session")
         {:token (body "authToken")})
       (do
-        (data/inc-state :ff_errors)       
         (data/logf :error "FF login failed: %s" (body "err"))
         nil))))
 
@@ -39,13 +41,12 @@
                        {:headers {"Authorization" (str "Bearer " token)}
                         :throw-exceptions false
                         :multipart [{:name "file"
-                                     :content (clojure.java.io/file filename)}]})]
-    (if (= (res :status) 200)
+                                     :content (clojure.java.io/file filename)}]})
+        success? (= (res :status) 200)]
+    (data/inc-state (if success? :ff_images :ff_errors))
+    (if success?
+      (get-in (json/read-str (res :body)) ["attachments" "id"])
       (do
-        (data/inc-state :ff_images)
-        (get-in (json/read-str (res :body)) ["attachments" "id"]))        
-      (do
-        (data/inc-state :ff_errors)
         (data/logf :error "Cannot create attachment: %s" ((res :body) "err"))
         nil))))
 
@@ -62,16 +63,13 @@
                         :throw-exceptions false
                         :accept :json
                         :headers {"Authorization" (str "Bearer " token)}
-                        :body (json/write-str req)})]
-    (if (= (res :status) 200)
-      (do
-        (data/inc-state :ff_posts)
-        (data/logf :info "Posted %s to FF" (post :link))
-        :posted)
-      (do
-        (data/inc-state :ff_errors)
-        (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err"))
-        :failed))))
+                        :body (json/write-str req)})
+        success? (= (res :status) 200)]
+    (data/inc-state (if success? :ff_posts :ff_errors))
+    (if success?
+      (data/logf :info "Posted %s to FF" (post :link))
+      (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err")))
+    success?))
 
 (defn get-elements [item tag]
   (filter #(= (get % :tag) tag) item))
@@ -204,17 +202,19 @@
   "Called from GAE cron job"
   (log/info "Next pass started, params:" (with-out-str (clojure.pprint/pprint params)))
   (if-let [session (create-session)]
-    (do
-      (log/debug "Got FF session")
-      (let [processed-posts (mapv #(process-post session %) (wp-feed))]
-        (if (some nil? processed-posts)
-          {:status 500
-           :body "Some post processing error occured, sorry"}
-          (if (not-empty processed-posts)
-            {:status 201
-             :body (str "New entries posted: " (clojure.string/join ", " processed-posts))}
-            {:status 204
-             :body "No new entries posted"}))))
+    (let [processed-posts (map #(process-post session %) (wp-feed))
+          failed-posts (remove #(get % :state) processed-posts)
+          done-posts (vec (cset/difference (set total-posts) (set failed-posts)))
+          status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
+      {:status status
+       :body (if (empty? total-posts)
+               "No posts to process"
+               (str (when-not (empty? done-posts)
+                      (format "Posted %d posts: %s\n" (count done-posts)
+                              (clojure.string/join ", " (map #(get % :link) done-posts))))
+                    (when-not (empty? failed-posts)
+                      (format "Failed %d posts: %s\n" (count failed-posts)
+                              (clojure.string/join ", " (map #(get % :link) failed-posts))))))})
     {:status 500
      :body "Cannot establish FreeFeed session"}))
 
