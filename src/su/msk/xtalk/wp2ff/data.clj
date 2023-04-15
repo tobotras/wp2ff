@@ -36,6 +36,10 @@
 (defn seen-total []
   ((first (sql! {:select :%count.* :from :seen})) :count))
 
+(defn category->hashtag [category]
+  (if-let [mapping (first (sql! {:select :ff_hashtag :from :categories :where [:= :wp_category category]}))]
+    (mapping :categories/ff_hashtag)))
+
 (defn logf [severity text & params]
   (let [message (apply format text params)]
     (sql! {:insert-into :log

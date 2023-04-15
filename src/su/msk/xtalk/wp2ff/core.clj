@@ -13,8 +13,6 @@
 
 (def ^:dynamic *cfg*
   {:api.root      "https://freefeed.net/"
-   :cat-hash      {"House" "домострой"
-                   "Work" "рабочее"}
    :default-port  8080})
 
 (defn create-session []
@@ -114,7 +112,7 @@
 
 (defn map-tags [tags]
   (->> tags
-       (map #(get (*cfg* :cat-hash) %))
+       (map data/category->hashtag)
        (remove nil?)))
 
 (defn footer [post]
@@ -204,10 +202,10 @@
   (if-let [session (create-session)]
     (let [processed-posts (map #(process-post session %) (wp-feed))
           failed-posts (remove #(get % :state) processed-posts)
-          done-posts (vec (cset/difference (set total-posts) (set failed-posts)))
+          done-posts (vec (cset/difference (set processed-posts) (set failed-posts)))
           status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
       {:status status
-       :body (if (empty? total-posts)
+       :body (if (empty? processed-posts)
                "No posts to process"
                (str (when-not (empty? done-posts)
                       (format "Posted %d posts: %s\n" (count done-posts)
