@@ -25,8 +25,8 @@
 
 (defn start-web-service [config callback]
   (defroutes app
-    (GET "/state" [] render-state)
-    (GET "/wp-poll" [] callback)
+    (GET "/state"   [] render-state)
+    (GET "/job/:job" [job] (callback job))
     (route/not-found "<h1>Page not found</h1>"))
   (jetty/run-jetty app
                    {:port (tools/env "PORT" (config :default-port))

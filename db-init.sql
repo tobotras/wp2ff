@@ -20,8 +20,9 @@ CREATE TABLE CATEGORIES (
   FF_HASHTAG  VARCHAR(100)
 );
 INSERT INTO CATEGORIES (WP_CATEGORY, FF_HASHTAG) VALUES
-  ('House', 'домострой'),
-  ('Work',  'рабочее')
+  ('House',  'домострой'),
+  ('Work',   'рабочее'),
+  ('Family', 'домашнее')
 ;
 
 CREATE TABLE LOG (

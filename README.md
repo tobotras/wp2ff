@@ -9,7 +9,11 @@ target/uberjar/wp2ff-0.1.0-SNAPSHOT-standalone.jar
 
 ## Usage
 
+Start service with
+
     $ java -jar wp2ff-0.1.0-SNAPSHOT-standalone.jar
+
+Then use cron jobs to invoke repost tasks by HTTP GETting /job/ff-poll and /job/wp-poll, accordingly.
 
 ## Environment
 
@@ -19,13 +23,10 @@ DB_NAME, DB_HOST, DB_USER, DB_PASS (defaults to wp2ff/localhost/wp2ff/wp2ffpass)
 
 ### User credentials
 
-WP_USER (WP username)  
+WP_USER (WP username)
+WP_PASS (WP password)
 FF_USER (FF username)  
 FF_PASS (FF password)  
-
-### Other settings
-
-WP_SLEEP (seconds between polls)
 
 ## Examples
 
@@ -35,6 +36,7 @@ To deploy into GAE use app.yaml like this:
     env: standard
     env_variables:
       WP_USER: "username"
+      WP_PASS: "password"
       FF_USER: "username"
       FF_PASS: "password"
       WP_SLEEP: 3600
@@ -42,7 +44,7 @@ To deploy into GAE use app.yaml like this:
 
 ## Bugs
 
-This might accidentally post a ton of junk into your FreeFeed account. Beware.
+This might accidentally post a ton of junk into your FreeFeed and WordPress accounts! Beware.
 
 ## License
 

@@ -8,19 +8,28 @@
             [su.msk.xtalk.wp2ff.tools :as tools]
             [su.msk.xtalk.wp2ff.data :as data]
             [su.msk.xtalk.wp2ff.service :as service])
-  (:import [java.io File])
+  (:import [java.io File]
+           [java.util Base64])
   (:gen-class))
 
 (def ^:dynamic *cfg*
   {:api.root      "https://freefeed.net/"
    :default-port  8080})
 
-(defn create-session []
+(defn CFG [key]
+  (if-let [val (*cfg* key)]
+    val
+    (do
+      (log/error "Reference to unknown parameter: " key)
+      nil)))
+
+(defn create-ff-session
   "Session is just an auth token for now"
+  []
   (log/info "Logging to FreeFeed...")
-  (let [res (http/post (str (*cfg* :api.root) "/v2/session")
-                       {:form-params {:username (*cfg* :ff-user)
-                                      :password (*cfg* :ff-pass)}
+  (let [res (http/post (str (CFG :api.root) "/v2/session")
+                       {:form-params {:username (CFG :ff-user)
+                                      :password (CFG :ff-pass)}
                         :throw-exceptions false})
         body (json/read-str (res :body))]
     (if (= (res :status) 200)
@@ -29,7 +38,7 @@
 
 (defn create-attachment [session filename]
   (let [token (session :token)
-        res (http/post (str (*cfg* :api.root) "/v1/attachments")
+        res (http/post (str (CFG :api.root) "/v1/attachments")
                        {:headers {"Authorization" (str "Bearer " token)}
                         :throw-exceptions false
                         :multipart [{:name "file"
@@ -43,16 +52,16 @@
         (data/logf :error "Cannot create attachment: %s" ((res :body) "err"))
         nil))))
 
-(defn do-post [session post]
-  (log/info "Posting to FreeFeed, entry:" (post :link))
+(defn do-ff-post [session post]
+  (log/infof "Posting to FreeFeed, entry: '%s'" (post :link))
   (let [attachments (mapv #(create-attachment session %) (post :imgs))]
     (when-not (some nil? attachments)
-      (let [feed (*cfg* :ff-user)
+      (let [feed (CFG :ff-user)
             req {:post {:body (post :text)
                         :attachments attachments}
                  :meta {:feeds feed}}
             token (session :token)
-            res (http/post (str (*cfg* :api.root) "/v1/posts")
+            res (http/post (str (CFG :api.root) "/v1/posts")
                            {:content-type :json
                             :throw-exceptions false
                             :accept :json
@@ -86,8 +95,9 @@
       (subs s 0 q)
       s)))
 
-(defn cache-locally [url]
+(defn cache-locally
   "Fetch an image to local file, return local path"
+  [url]
   (let [res (http/get url
                       {:throw-exceptions false
                        :as :stream})]
@@ -119,12 +129,18 @@
                (map #(str "#" %))
                (clojure.string/join ", "))))
 
-(defn post-eligible? [post]
+(defn eligible-wp-post? [post]
   (and 
    (.contains (map clojure.string/lower-case (post :tags)) "freefeed")
    (not (data/seen-post? post))))
 
-(defn parse-feed [xml-string]
+(defn eligible-ff-post? [post]
+  (and
+   ;;; Danger: take care of not reposting it back
+   (.contains (clojure.string/lower-case (post :text)) "#ff2wp")
+   (not (data/seen-post? post))))
+
+(defn parse-wp-feed [xml-string]
   ;;(spit "/tmp/feed.xml" xml-string)
   (let [xml (xml-seq (xml/parse-str xml-string))]
     (for [item xml :when (= (get item :tag) :item)]
@@ -133,7 +149,7 @@
             link (get-content content :link)
             post {:tags tags
                   :link link}]
-        (when (post-eligible? post)
+        (when (eligible-wp-post? post)
           (let [post (assoc post :tags (map-tags tags))
                 text (str (tools/html->text (get-content content :encoded))
                           "\n\n"
@@ -143,15 +159,35 @@
                    {:imgs (get-post-images content :content)
                     :text text})))))))
 
-(defn wp-feed []
+(defmacro ppr [args]
+  `(with-out-str (clojure.pprint/pprint ~args)))
+
+(defn get-ff-images [post attachments]
+  (remove nil?
+          (map
+           (fn [id]
+             (when-let [url (get (first (filter #(= (get % "id") id) attachments)) "url")]
+               (cache-locally url)))
+           (get post "attachments"))))
+           
+(defn parse-ff-feed [item]
+  (let [body        (get item "posts")
+        attachments (get item "attachments")]
+    (for [item body]
+      (let [post {:link (get item "id")
+                  :text (get item "body")}]
+        (when (eligible-ff-post? post)
+          (assoc post :imgs (get-ff-images item attachments)))))))
+
+(defn fetch-wp-poll []
   (log/info "Fetching Wordpress feed...")
-  (let [res (http/get (*cfg* :RSS)
+  (let [res (http/get (CFG :wp-feed)
                       {:throw-exceptions false})]
     (if (= (res :status) 200)
-      (let [entries (parse-feed (res :body))
+      (let [entries (parse-wp-feed (res :body))
             new-entries (remove nil? entries)]
         (data/inc-state :wp_sessions)
-        (data/logf :debug "Fetched %d entries, %d old, %d new"
+        (data/logf :debug "Fetched %d entries: %d old, %d new"
                      (count entries)
                      (count (remove #(not (nil? %)) entries))
                      (count new-entries))
@@ -168,59 +204,119 @@
 
 (defn configure []
   (let [wp-user (tools/env "WP_USER")
+        wp-pass (tools/env "WP_PASS")
         ff-user (tools/env "FF_USER")
         ff-pass (tools/env "FF_PASS")]
-    (when (some nil? [wp-user ff-user ff-pass])
+    (when (some nil? [wp-user wp-pass ff-user ff-pass])
       (log/error "Environment not set")
       (System/exit 1))
-    (def ^:dynamic *cfg*
-      (merge *cfg*
-             {:RSS (format "https://%s.wordpress.com/feed/" wp-user)
-              :wp-user wp-user
-              :ff-user ff-user
-              :ff-pass ff-pass})))
+    (let [wp-root (format "https://%s.wordpress.com/" wp-user)]
+      (def ^:dynamic *cfg*
+        (merge *cfg*
+               {:wp-feed     (str wp-root "feed/")
+                :wp-api.root (str wp-root "/wp-json/wp")
+                :wp-user wp-user
+                :wp-pass wp-pass
+                :ff-user ff-user
+                :ff-pass ff-pass}))))
   (data/init {:dbtype "postgresql"
               :dbname   (tools/env "DB_NAME" "wp2ff")
               :host     (tools/env "DB_HOST" "localhost")
               :user     (tools/env "DB_USER" "wp2ff")
               :password (tools/env "DB_PASS" "wp2ffpass")}))
   
-(defn process-post [session post]
-  (let [result (when-let [post-result (do-post session post)]
+(defn process-wp-poll [session post]
+  (let [result (when-let [post-result (do-ff-post session post)]
                  (data/mark-seen post)
                  post-result)]
     (cleanup post)
     (assoc post :state result)))
 
-(defn wp-to-ff [params]
-  "Called from GAE cron job"
-  (log/info "Next pass started, params:" (with-out-str (clojure.pprint/pprint params)))
-  (let [[session err] (create-session)]
+(defn base64-encode [to-encode]
+  (.encode (Base64/getEncoder) (.getBytes to-encode)))
+  
+(defn do-wp-post [post]
+  (log/debugf "Posting new FF post to WP! Post: %s" (ppr post))
+  (let [res (http/post (str (CFG :wp-api.root) "/v2/posts")
+                       {:headers {"Authorization" (str "Basic " (base64-encode (format "%s:%s" (CFG :wp-user) (CFG :wp-pass))))}
+                        :throw-exceptions false
+                        :content-type :json
+                        :accept :json
+                        :body (json/write-str {:title "Test message title"
+                                               :status "draft"})})]
+    (log/debugf "Post result: %s" (ppr res))
+    nil))
+
+(defn process-ff-poll [_ post]
+  (let [result (when-let [post-result (do-wp-post post)]
+                 (data/mark-seen post)
+                 post-result)]
+    (cleanup post)
+    (assoc post :state result)))
+
+(defn ff-session-error [err]
+  (data/inc-state :ff_errors)
+  (data/logf :error "FF login failed: %s" err)
+  {:status 500
+   :body "Cannot establish FreeFeed session"})
+
+(defn process-feed [fetcher processor]
+  (let [[session err] (create-ff-session)]
     (if session
       (do
         (data/inc-state :ff_sessions)
         (data/logf :debug "Created new FF session")
-        (let [processed-posts (map #(process-post session %) (wp-feed))
+        (let [fetched-posts (fetcher)
+              processed-posts (map #(processor session %) fetched-posts)
               failed-posts (remove #(get % :state) processed-posts)
               done-posts (vec (cset/difference (set processed-posts) (set failed-posts)))
               status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
           {:status status
            :body (if (empty? processed-posts)
-                   "No posts to process"
+                   "No unseen posts yet"
                    (str (when-not (empty? done-posts)
                           (format "Posted %d posts: %s\n" (count done-posts)
                                   (clojure.string/join ", " (map #(get % :link) done-posts))))
                         (when-not (empty? failed-posts)
                           (format "Failed %d posts: %s\n" (count failed-posts)
                                   (clojure.string/join ", " (map #(get % :link) failed-posts))))))}))
+      (ff-session-error err))))
+
+(defn fetch-ff-poll []
+  (log/info "Fetching FF feed...")
+  (let [res (http/get (format "%s/v2/timelines/%s" (CFG :api.root) (CFG :ff-user))
+                      {:throw-exceptions false})]
+    (if (= (res :status) 200)
+      (let [entries (parse-ff-feed (json/read-str (res :body)))
+            new-entries (remove nil? entries)]
+        (data/inc-state :ff_sessions)
+        (data/logf :debug "Fetched %d entries: %d old, %d new"
+                   (count entries)
+                   (count (remove #(not (nil? %)) entries))
+                   (count new-entries))
+        new-entries)
       (do
         (data/inc-state :ff_errors)
-        (data/logf :error "FF login failed: %s" err)
-        {:status 500
-         :body "Cannot establish FreeFeed session"}))))
+        (data/logf :error "Cannot fetch FF feed: %s" "(no diagnostics yet)")
+        nil))))
+
+(defn mresolve
+  "No idea why (ns-resolve *ns* sym) doesn't work for me"
+  [sym]
+  (ns-resolve (find-ns 'su.msk.xtalk.wp2ff.core) sym))
+
+(defn process-feed-job
+  "Called from GAE cron job"
+  [job]
+  (case job
+    ("ff-poll" "wp-poll") (process-feed
+                           (mresolve (symbol (format "fetch-%s"   job)))
+                           (mresolve (symbol (format "process-%s" job))))
+    {:status 400
+     :body (format "Unknown job type: '%s'" job)}))
 
 (defn -main [& args]
   (log/info "wp2ff v0.1, tobotras@gmail.com")
   (configure)
   (log/debug "Set everything, serving")
-  (service/start-web-service *cfg* wp-to-ff))
+  (service/start-web-service *cfg* process-feed-job))
