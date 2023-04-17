@@ -30,6 +30,20 @@
       item
       (str "ERR: cannot parse " (type item)))))
 
+(def MAX_TEXT_SIZE 280)
+ 
+(defn shorten
+  "Pass first MAX_TEXT_SIZE chars, then cut on word end and add reference to link"
+  [s]
+  (if (< (count s) MAX_TEXT_SIZE)
+    s
+    (loop [i MAX_TEXT_SIZE]
+      (if (> (inc i) (count s))
+        s
+        (if (clojure.string/blank? (subs s i (inc i)))
+          (str (subs s 0 i) "... (Read more in original post)")
+          (recur (inc i)))))))
+
 (defn html->text [string]
   (->> string
        hickory/parse
@@ -41,7 +55,8 @@
        first
        content
        (mapv item->text)
-       (clojure.string/join "")))
+       (clojure.string/join "")
+       shorten))
   
 (defn env [var & [default]]
   (if-let [value (System/getenv var)]

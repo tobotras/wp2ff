@@ -1,4 +1,4 @@
 cron:
 - description: "Wordpress poll"
-  url: /wp-poll
+  url: /job/wp-poll
   schedule: every 1 hours

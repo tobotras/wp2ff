@@ -39,7 +39,7 @@ To deploy into GAE use app.yaml like this:
       WP_PASS: "password"
       FF_USER: "username"
       FF_PASS: "password"
-      WP_SLEEP: 3600
+      DB_HOST: 10.3.0.1
     entrypoint: java -Xmx64m -jar wp2ff-0.1.0-SNAPSHOT-standalone.jar
 
 ## Bugs

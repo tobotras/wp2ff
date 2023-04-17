@@ -12,6 +12,9 @@
            [java.util Base64])
   (:gen-class))
 
+(defmacro ppr [args]
+  `(with-out-str (clojure.pprint/pprint ~args)))
+
 (def ^:dynamic *cfg*
   {:api.root      "https://freefeed.net/"
    :default-port  8080})
@@ -130,6 +133,7 @@
                (clojure.string/join ", "))))
 
 (defn eligible-wp-post? [post]
+  (log/debugf "Eligible-wp-post? %s" (ppr post))
   (and 
    (.contains (map clojure.string/lower-case (post :tags)) "freefeed")
    (not (data/seen-post? post))))
@@ -158,9 +162,6 @@
             (merge post
                    {:imgs (get-post-images content :content)
                     :text text})))))))
-
-(defmacro ppr [args]
-  `(with-out-str (clojure.pprint/pprint ~args)))
 
 (defn get-ff-images [post attachments]
   (remove nil?
