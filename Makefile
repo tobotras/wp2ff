@@ -5,6 +5,8 @@ JAR: $(jar)
 $(jar): project.clj test/su/msk/xtalk/wp2ff/*.clj resources/log4j.properties src/su/msk/xtalk/wp2ff/*.clj
 	lein uberjar
 
+.PHONY: deploy test run
+
 deploy: $(jar)
 	cp $(jar) .
 	yes | (gcloud app deploy app.yaml; gcloud app deploy cron.yaml)

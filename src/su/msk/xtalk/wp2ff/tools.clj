@@ -1,5 +1,6 @@
 (ns su.msk.xtalk.wp2ff.tools
-  (:require [hickory.core :as hickory])
+  (:require [hickory.core :as hickory]
+            [clojure.string :as str])
   (:gen-class))
 
 ;; CONVERT state to DB
@@ -11,9 +12,24 @@
 (defn tag [elt]
   (first elt))
 
+(defn dense-concat
+  "Concatenate strings, adding space if there is no space between items"
+  [strings]
+  (loop [res ""
+         s strings]
+    (if (empty? s)
+      res
+      (let [cur (first s)
+            tail (rest s)
+            separator (if (or (empty? tail)
+                              (str/blank? (subs cur (- (count cur) 1)))
+                              (str/blank? (subs (first tail) 0 1)))
+                        "" " ")]
+        (recur (str res cur separator) tail)))))
+
 (declare item->text)
 (defn content->text [content]
-  (clojure.string/join " " (mapv item->text content)))
+  (dense-concat (map item->text content)))
   
 (defn item->text [item]
   (println "item->text got item" item)
@@ -21,7 +37,7 @@
     (let [cont (content item)
           tag (tag item)]
       (case tag
-        :p (content->text cont)
+        :p (str (content->text cont) "\n")
         :em (str "/" (content->text cont) "/")
         :br "\n"
         (:figure) ""
@@ -30,19 +46,17 @@
       item
       (str "ERR: cannot parse " (type item)))))
 
-(def MAX_TEXT_SIZE (* 4 140))
+(def ^:dynamic *max-text-size* (* 4 140))
  
 (defn shorten
-  "Pass first MAX_TEXT_SIZE chars, then cut on word end and add reference to link"
+  "Pass first max-text-size chars, then cut on word end and add reference to link"
   [s]
-  (if (< (count s) MAX_TEXT_SIZE)
-    s
-    (loop [i MAX_TEXT_SIZE]
-      (if (> (inc i) (count s))
-        s
-        (if (clojure.string/blank? (subs s i (inc i)))
-          (str (subs s 0 i) "... (Read more in original post)")
-          (recur (inc i)))))))
+  (loop [i *max-text-size*]
+    (if (> (inc i) (count s))
+      s
+      (if (clojure.string/blank? (subs s i (inc i)))
+        (str (subs s 0 i) "... (Read more in original post)")
+        (recur (inc i))))))
 
 (defn html->text [string]
   (->> string

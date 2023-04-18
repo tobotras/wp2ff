@@ -174,7 +174,9 @@
   (remove nil?
           (map
            (fn [id]
-             (when-let [url (get (first (filter #(= (get % "id") id) attachments)) "url")]
+             (when-let [url (get
+                             (first (filter #(= (get % "id") id) attachments))
+                             "url")]
                (cache-locally url)))
            (get post "attachments"))))
            
@@ -206,7 +208,7 @@
         nil))))
 
 (defn cleanup [post]
-  (mapv io/delete-file (post :imgs)))
+  (run! io/delete-file (post :imgs)))
 
 (defn configure []
   (let [wp-user (tools/env "WP_USER")
@@ -242,13 +244,17 @@
     (cleanup post)
     (assoc post :state result)))
 
-(defn base64-encode [to-encode]
-  (.encode (Base64/getEncoder) (.getBytes to-encode)))
+(defn basic-auth-header [user pass]
+  (->> (str user ":" pass)
+       .getBytes
+       #((Base64/getEncoder) %)
+       (str "Basic ")))
   
 (defn do-wp-post [post]
   (log/debugf "Posting new FF post to WP! Post: %s" (ppr post))
   (let [res (http/post (str (CFG :wp-api.root) "/v2/posts")
-                       {:headers {"Authorization" (str "Basic " (base64-encode (format "%s:%s" (CFG :wp-user) (CFG :wp-pass))))}
+                       {:headers {"Authorization"
+                                  (basic-auth-header (CFG :wp-user) (CFG :wp-pass))}
                         :throw-exceptions false
                         :content-type :json
                         :accept :json
@@ -279,17 +285,21 @@
         (let [fetched-posts (fetcher)
               processed-posts (map #(processor session %) fetched-posts)
               failed-posts (remove #(get % :state) processed-posts)
-              done-posts (vec (cset/difference (set processed-posts) (set failed-posts)))
+              done-posts (vec (cset/difference (set processed-posts)
+                                               (set failed-posts)))
               status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
           {:status status
            :body (if (empty? processed-posts)
                    "No unseen posts yet"
-                   (str (when-not (empty? done-posts)
-                          (format "Posted %d posts: %s\n" (count done-posts)
-                                  (clojure.string/join ", " (map #(get % :link) done-posts))))
+                   (str
+                    (when-not (empty? done-posts)
+                      (format "Posted %d posts: %s\n" (count done-posts)
+                              (clojure.string/join
+                               ", " (map #(get % :link) done-posts))))
                         (when-not (empty? failed-posts)
                           (format "Failed %d posts: %s\n" (count failed-posts)
-                                  (clojure.string/join ", " (map #(get % :link) failed-posts))))))}))
+                                  (clojure.string/join
+                                   ", " (map #(get % :link) failed-posts))))))}))
       (ff-session-error err))))
 
 (defn fetch-ff-poll []
