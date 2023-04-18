@@ -24,4 +24,6 @@
   :target-path "target/%s"
   :profiles {:uberjar {:aot :all
                        :jvm-opts ["-Dclojure.compiler.direct-linking=true"
-                                  "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/log4j-factory"]}})
+                                  "-Dclojure.tools.logging.factory=clojure.tools.logging.impl/log4j-factory"]}
+             :test {:dependencies [[mockery "0.1.4"]]}})
+

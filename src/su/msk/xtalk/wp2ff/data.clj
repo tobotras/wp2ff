@@ -4,15 +4,15 @@
             [clojure.tools.logging :as logg :only log])
   (:gen-class))
 
-(def config (atom {}))
+(def config {})
 
 (defn init [cfg]
-  (swap! config (fn [_] cfg)))
+  (alter-var-root (var config) (constantly cfg)))
 
 (defn sql! [request]
   (let [req (sql/format request)]
     (logg/logf :debug "SQL: '%s'" req)
-    (jdbc/execute! @config req)))
+    (jdbc/execute! config req)))
 
 (defn get-state []
   (update-keys

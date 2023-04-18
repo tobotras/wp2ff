@@ -15,16 +15,14 @@
 (defmacro ppr [args]
   `(with-out-str (clojure.pprint/pprint ~args)))
 
-(def ^:dynamic *cfg*
-  {:api.root      "https://freefeed.net/"
-   :default-port  8080})
+(def the-config
+  {:api.root "https://freefeed.net/"
+   :port     8080})
 
 (defn CFG [key]
-  (if-let [val (*cfg* key)]
-    val
-    (do
-      (log/error "Reference to unknown parameter: " key)
-      nil)))
+  (if (contains? the-config key)
+    (get the-config key)
+    (throw (Exception. (str "Reference to unknown parameter: " key)))))
 
 (defn create-ff-session
   "Session is just an auth token for now"
@@ -39,21 +37,31 @@
       [{:token (body "authToken")} nil]
       [nil (body "err")])))
 
+(defn post-attachment [session filename]
+  (try
+    (let [token (session :token)
+          res (http/post (str (CFG :api.root) "/v1/attachments")
+                         {:headers {"Authorization" (str "Bearer " token)}
+                          :throw-exceptions false
+                          :multipart [{:name "file"
+                                       :content (clojure.java.io/file filename)}]})]
+      (if (= (res :status) 200)
+        [(get-in (json/read-str (res :body)) ["attachments" "id"]) nil]
+        [nil ((res :body) "err")]))
+    (catch java.io.FileNotFoundException e
+      [nil (ex-message e)])))
+
 (defn create-attachment [session filename]
-  (let [token (session :token)
-        res (http/post (str (CFG :api.root) "/v1/attachments")
-                       {:headers {"Authorization" (str "Bearer " token)}
-                        :throw-exceptions false
-                        :multipart [{:name "file"
-                                     :content (clojure.java.io/file filename)}]})]
-    (if (= (res :status) 200)
-      (do
-        (data/inc-state :ff_images)
-        (get-in (json/read-str (res :body)) ["attachments" "id"]))
+  (let [[id err] (post-attachment session filename)]
+    (if id
+      (data/inc-state :ff_images)
       (do
         (data/inc-state :ff_errors)
-        (data/logf :error "Cannot create attachment: %s" ((res :body) "err"))
-        nil))))
+        (data/logf :error "Cannot create attachment: %s" err)))))
+
+(defn drop-attachment [session id]
+  ;; Don't know if it's possible
+  true)
 
 (defn do-ff-post [session post]
   (log/infof "Posting to FreeFeed, entry: '%s'" (post :link))
@@ -128,9 +136,8 @@
   (format "Fed from !%s\n%s\n"
           (post :link)
           (->> (post :tags)
-               (cons "wordpress")
-               (map #(str "#" %))
-               (clojure.string/join ", "))))
+               (cons "#wordpress")
+               (clojure.string/join ", #"))))
 
 (defn eligible-wp-post? [post]
   (log/debugf "Eligible-wp-post? %s" (ppr post))
@@ -199,27 +206,29 @@
         nil))))
 
 (defn cleanup [post]
-  (doall
-   (for [image (post :imgs)]
-     (io/delete-file image))))
+  (mapv io/delete-file (post :imgs)))
 
 (defn configure []
   (let [wp-user (tools/env "WP_USER")
         wp-pass (tools/env "WP_PASS")
         ff-user (tools/env "FF_USER")
-        ff-pass (tools/env "FF_PASS")]
+        ff-pass (tools/env "FF_PASS")
+        port    (tools/env "PORT" 8080)
+        wp-root (format "https://%s.wordpress.com/" wp-user)]
     (when (some nil? [wp-user wp-pass ff-user ff-pass])
       (log/error "Environment not set")
       (System/exit 1))
-    (let [wp-root (format "https://%s.wordpress.com/" wp-user)]
-      (def ^:dynamic *cfg*
-        (merge *cfg*
-               {:wp-feed     (str wp-root "feed/")
-                :wp-api.root (str wp-root "/wp-json/wp")
-                :wp-user wp-user
-                :wp-pass wp-pass
-                :ff-user ff-user
-                :ff-pass ff-pass}))))
+    (alter-var-root (var the-config)
+                    #(merge %
+                            {:wp-feed     (str wp-root "feed/")
+                             :wp-api.root (str wp-root "/wp-json/wp")
+                             :wp-user     wp-user
+                             :wp-pass     wp-pass
+                             :ff-user     ff-user
+                             :ff-pass     ff-pass
+                             :port        port}))))
+
+(defn init-db []
   (data/init {:dbtype "postgresql"
               :dbname   (tools/env "DB_NAME" "wp2ff")
               :host     (tools/env "DB_HOST" "localhost")
@@ -302,7 +311,7 @@
         nil))))
 
 (defn mresolve
-  "No idea why (ns-resolve *ns* sym) doesn't work for me"
+  "No idea why (resolve sym) doesn't work"
   [sym]
   (ns-resolve (find-ns 'su.msk.xtalk.wp2ff.core) sym))
 
@@ -319,5 +328,6 @@
 (defn -main [& args]
   (log/info "wp2ff v0.1, tobotras@gmail.com")
   (configure)
+  (init-db)
   (log/debug "Set everything, serving")
-  (service/start-web-service *cfg* process-feed-job))
+  (service/start-web-service (the-config :port) process-feed-job))

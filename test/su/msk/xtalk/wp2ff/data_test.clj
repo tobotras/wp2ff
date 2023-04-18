@@ -7,8 +7,7 @@
 
 (let [cnt (atom 0)]
   (defn make-test-post []
-    (swap! cnt inc)
-    {:link @cnt}))
+    {:link (str "test-" (swap! cnt inc))}))
 
 (deftest t-mark-seen
   (let [post (make-test-post)]
@@ -17,7 +16,6 @@
 
 (deftest t-not-seen
   (is (nil? (seen-post? (make-test-post)))))
-
 
 (defn drop-test-posts [the-test]
   (the-test)

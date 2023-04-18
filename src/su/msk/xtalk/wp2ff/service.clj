@@ -23,11 +23,11 @@
    :headers {"Content-Type" "text/plain"}
    :body (str "Request:\n" (with-out-str (clojure.pprint/pprint request))) })
 
-(defn start-web-service [config callback]
+(defn start-web-service [port callback]
   (defroutes app
     (GET "/state"   [] render-state)
     (GET "/job/:job" [job] (callback job))
     (route/not-found "<h1>Page not found</h1>"))
   (jetty/run-jetty app
-                   {:port (tools/env "PORT" (config :default-port))
+                   {:port port
                     :join? true}))

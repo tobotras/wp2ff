@@ -30,7 +30,7 @@
       item
       (str "ERR: cannot parse " (type item)))))
 
-(def MAX_TEXT_SIZE 280)
+(def MAX_TEXT_SIZE (* 4 140))
  
 (defn shorten
   "Pass first MAX_TEXT_SIZE chars, then cut on word end and add reference to link"

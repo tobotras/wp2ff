@@ -8,3 +8,9 @@ $(jar): project.clj test/su/msk/xtalk/wp2ff/*.clj resources/log4j.properties src
 deploy: $(jar)
 	cp $(jar) .
 	yes | (gcloud app deploy app.yaml; gcloud app deploy cron.yaml)
+
+test:
+	PORT=8090 WP_USER=tobotras WP_PASS=qwe FF_USER=tobotras FF_PASS=qwe lein with-profile test test
+
+run:
+	PORT=8090 WP_USER=tobotras WP_PASS=qwe FF_USER=tobotras FF_PASS=qwe lein run
