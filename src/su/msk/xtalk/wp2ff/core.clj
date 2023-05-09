@@ -194,7 +194,9 @@
                   :link link}]
         (when (eligible-wp-post? post)
           (let [post (assoc post :tags (map-tags tags))
-                text (str (tools/html->text (get-content content :encoded) (post :link))
+                text (str (tools/html->text (get-content content :encoded)
+                                            ;; FIXME: bang in front of URL works only for FF
+                                            (str "!" (post :link)))
                           "\n\n" (footer post) "\n")]
             (log/debug "Text to be posted:" text)
             (merge post
