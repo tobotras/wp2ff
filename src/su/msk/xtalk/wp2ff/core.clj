@@ -51,40 +51,73 @@
     (catch java.io.FileNotFoundException e
       [nil (ex-message e)])))
 
-(defn create-attachment [session filename]
+(defn image->attachment [session filename]
   (let [[id err] (post-attachment session filename)]
     (if id
       (data/inc-state :ff_images)
       (do
         (data/inc-state :ff_errors)
-        (data/logf :error "Cannot create attachment: %s" err)))))
+        (data/logf :error "Cannot create attachment: %s" err)))
+    id))
 
 (defn drop-attachment [session id]
   ;; Don't know if it's possible
   true)
 
+(defn ff-api-post [session post attachments]     
+  (let [feed (CFG :ff-user)
+        req {:post {:body (post :text)
+                    :attachments attachments}
+             :meta {:feeds feed}}
+        token (session :token)
+        res (http/post (str (CFG :api.root) "/v1/posts")
+                       {:content-type :json
+                        :throw-exceptions false
+                        :accept :json
+                        :headers {"Authorization" (str "Bearer " token)}
+                        :body (json/write-str req)})
+        success (= (res :status) 200)]
+    (data/inc-state (if success :ff_posts :ff_errors))
+    (if success
+      (data/logf :info "Posted %s to FF" (post :link))
+      (data/logf :error "Post of %s failed: %s" (post :link) ((json/read-str (res :body)) "err")))
+    success))
+
+(defn dw-api-post [session post attachments]
+  nil
+  )
+
 (defn do-ff-post [session post]
   (log/infof "Posting to FreeFeed, entry: '%s'" (post :link))
-  (let [attachments (mapv #(create-attachment session %) (post :imgs))]
+  (let [attachments (mapv #(image->attachment session %) (post :imgs))]
     (when-not (some nil? attachments)
-      (let [feed (CFG :ff-user)
-            req {:post {:body (post :text)
-                        :attachments attachments}
-                 :meta {:feeds feed}}
-            token (session :token)
-            res (http/post (str (CFG :api.root) "/v1/posts")
-                           {:content-type :json
-                            :throw-exceptions false
-                            :accept :json
-                            :headers {"Authorization" (str "Bearer " token)}
-                            :body (json/write-str req)})
-            success? (= (res :status) 200)]
-        (data/inc-state (if success? :ff_posts :ff_errors))
-        (if success?
-          (data/logf :info "Posted %s to FF" (post :link))
-          (data/logf :error "Post of %s failed: %s" (post :link) ((res :body) "err")))
-        success?))))
-    
+      (ff-api-post session post attachments))))
+
+(defn do-dw-post [session post]
+  (log/infof "Posting to DreamWidth, entry: '%s'" (post :link))
+  (let [attachments (mapv #(image->attachment session %) (post :imgs))]
+    (when-not (some nil? attachments)
+      (dw-api-post session post attachments))))
+
+(defn wp-to-any?
+  "Should we repost this post somewhere?"
+  [post tag]
+  (.contains (map clojure.string/lower-case (post :tags)) tag))
+
+(defn wp-to-ff-post? [post]
+  (wp-to-any? post "freefeed"))
+
+(defn wp-to-dw-post? [post]
+  (wp-to-any? post "dreamwidth"))
+
+(defn post-somewhere [session post]
+  (cond
+    (wp-to-ff-post? post) (do-ff-post session post)
+    (wp-to-dw-post? post) (do-dw-post session post)
+    :else (do
+            (log/errorf "INTERNAL ERROR: no idea where to post %s" (ppr post))
+            nil)))
+
 (defn get-elements [item tag]
   (filter #(= (get % :tag) tag) item))
 
@@ -133,17 +166,16 @@
        (remove nil?)))
 
 (defn footer [post]
-  (format "Fed from !%s\n%s\n"
-          (post :link)
-          (->> (post :tags)
-               (cons "#wordpress")
-               (clojure.string/join ", #"))))
+  (->> (post :tags)
+       (cons "#wordpress")
+       (clojure.string/join ", #")))
 
 (defn eligible-wp-post? [post]
   (log/debugf "Eligible-wp-post? %s" (ppr post))
   (and 
-   (.contains (map clojure.string/lower-case (post :tags)) "freefeed")
-   (not (data/seen-post? post))))
+   (not (data/seen-post? post))
+   (or (wp-to-ff-post? post)
+       (wp-to-dw-post? post))))
 
 (defn eligible-ff-post? [post]
   (and
@@ -162,9 +194,8 @@
                   :link link}]
         (when (eligible-wp-post? post)
           (let [post (assoc post :tags (map-tags tags))
-                text (str (tools/html->text (get-content content :encoded))
-                          "\n\n"
-                          (footer post))]
+                text (str (tools/html->text (get-content content :encoded) (post :link))
+                          "\n\n" (footer post) "\n")]
             (log/debug "Text to be posted:" text)
             (merge post
                    {:imgs (get-post-images content :content)
@@ -238,7 +269,7 @@
               :password (tools/env "DB_PASS" "wp2ffpass")}))
   
 (defn process-wp-poll [session post]
-  (let [result (when-let [post-result (do-ff-post session post)]
+  (let [result (when-let [post-result (post-somewhere session post)]
                  (data/mark-seen post)
                  post-result)]
     (cleanup post)
@@ -308,11 +339,11 @@
                       {:throw-exceptions false})]
     (if (= (res :status) 200)
       (let [entries (parse-ff-feed (json/read-str (res :body)))
-            new-entries (remove nil? entries)]
+            [new-entries old-entries] ((juxt filter remove) nil? entries)]
         (data/inc-state :ff_sessions)
         (data/logf :debug "Fetched %d entries: %d old, %d new"
                    (count entries)
-                   (count (remove #(not (nil? %)) entries))
+                   (count old-entries)
                    (count new-entries))
         new-entries)
       (do

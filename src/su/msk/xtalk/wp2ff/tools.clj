@@ -32,7 +32,6 @@
   (dense-concat (map item->text content)))
   
 (defn item->text [item]
-  (println "item->text got item" item)
   (if (vector? item)
     (let [cont (content item)
           tag (tag item)]
@@ -50,15 +49,15 @@
  
 (defn shorten
   "Pass first max-text-size chars, then cut on word end and add reference to link"
-  [s]
+  [link s]
   (loop [i *max-text-size*]
     (if (> (inc i) (count s))
       s
       (if (clojure.string/blank? (subs s i (inc i)))
-        (str (subs s 0 i) "... (Read more in original post)")
+        (str (subs s 0 i) "... Read more in original post: " link)
         (recur (inc i))))))
 
-(defn html->text [string]
+(defn html->text [string link]
   (->> string
        hickory/parse
        hickory/as-hiccup
@@ -70,7 +69,7 @@
        content
        (mapv item->text)
        (clojure.string/join "")
-       shorten))
+       (shorten link)))
   
 (defn env [var & [default]]
   (if-let [value (System/getenv var)]
