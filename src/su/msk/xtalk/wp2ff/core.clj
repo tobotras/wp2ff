@@ -112,6 +112,7 @@
 
 (defn post-somewhere [session post]
   (cond
+    (CFG :dry-run) (log/infof "Dry run, don't post anywhere.")
     (wp-to-ff-post? post) (do-ff-post session post)
     (wp-to-dw-post? post) (do-dw-post session post)
     :else (do
@@ -187,7 +188,7 @@
    (not (data/seen-post? post))))
 
 (defn parse-wp-feed [xml-string]
-  ;;(spit "/tmp/feed.xml" xml-string)
+  (spit "/tmp/feed.xml" xml-string)
   (let [xml (xml-seq (xml/parse-str xml-string))]
     (for [item xml :when (= (get item :tag) :item)]
       (let [content (get item :content)
@@ -251,7 +252,7 @@
 (defn cleanup [post]
   (run! io/delete-file (post :imgs)))
 
-(defn configure []
+(defn configure [args]
   (let [wp-user (tools/env "WP_USER")
         wp-pass (tools/env "WP_PASS")
         ff-user (tools/env "FF_USER")
@@ -261,16 +262,21 @@
     (when (some nil? [wp-user wp-pass ff-user ff-pass])
       (log/error "Environment not set")
       (System/exit 1))
+    (when (some #(or (= % "-h") (= % "--help")) args)
+      (println "Usage: wp2ff [--dry-run]")
+      (System/exit 0))
     (alter-var-root (var the-config)
-                    #(merge %
-                            {:wp-feed     (str wp-root "feed/")
-                             :wp-api.root (str wp-root "/wp-json/wp")
-                             :wp-user     wp-user
-                             :wp-pass     wp-pass
-                             :ff-user     ff-user
-                             :ff-pass     ff-pass
-                             :port        port}))))
-
+                    (fn [cfg]
+                      (merge cfg
+                             {:wp-feed     (str wp-root "feed/")
+                              :wp-api.root (str wp-root "/wp-json/wp")
+                              :wp-user     wp-user
+                              :wp-pass     wp-pass
+                              :ff-user     ff-user
+                              :ff-pass     ff-pass
+                              :port        port
+                              :dry-run     (some #(= % "--dry-run") args)})))))
+  
 (defn init-db []
   (data/init {:dbtype "postgresql"
               :dbname   (tools/env "DB_NAME" "wp2ff")
@@ -381,7 +387,7 @@
 
 (defn -main [& args]
   (log/info "wp2ff v0.1, tobotras@gmail.com")
-  (configure)
+  (configure args)
   (init-db)
   (log/debug "Set everything, serving")
   (service/start-web-service (the-config :port) process-feed-job))
