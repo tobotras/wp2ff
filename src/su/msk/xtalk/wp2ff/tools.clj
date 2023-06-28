@@ -12,6 +12,9 @@
 (defn tag [elt]
   (first elt))
 
+(defn attributes [elt]
+  (second elt))
+
 (defn dense-concat
   "Concatenate strings, adding space if there is no space between items"
   [strings]
@@ -30,7 +33,16 @@
 (declare item->text)
 (defn content->text [content]
   (dense-concat (map item->text content)))
-  
+
+(defmacro ppr [args]
+  `(with-out-str (clojure.pprint/pprint ~args)))
+
+(defn img->text [item]
+  (let [attrs (attributes item)]
+    (if (= (:class attrs) "wp-smiley")
+      (:alt attrs)
+      "")))
+
 (defn item->text [item]
   (if (vector? item)
     (let [cont (content item)
@@ -39,6 +51,7 @@
         :p (str (content->text cont) "\n")
         :em (str "/" (content->text cont) "/")
         :br "\n"
+        :img (img->text item)
         (:figure) ""
         (str "ERR: unknown element <" tag ">")))
     (if (string? item)
