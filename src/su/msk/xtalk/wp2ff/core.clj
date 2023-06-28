@@ -165,6 +165,9 @@
        (map data/category->hashtag)
        (remove nil?)))
 
+(defn header [post]
+  (or (post :title) ""))
+
 (defn footer [post]
   (->> (post :tags)
        (cons "#wordpress")
@@ -188,16 +191,21 @@
   (let [xml (xml-seq (xml/parse-str xml-string))]
     (for [item xml :when (= (get item :tag) :item)]
       (let [content (get item :content)
-            tags (get-contents content :category)
-            link (get-content content :link)
-            post {:tags tags
-                  :link link}]
+            tags    (get-contents content :category)
+            link    (get-content content :link)
+            title   (get-content content :title)
+            post    {:title title
+                     :tags tags
+                     :link link}]
         (when (eligible-wp-post? post)
           (let [post (assoc post :tags (map-tags tags))
-                text (str (tools/html->text (get-content content :encoded)
-                                            ;; FIXME: bang in front of URL works only for FF
-                                            (str "!" (post :link)))
-                          "\n\n" (footer post) "\n")]
+                text (str
+                      (header post) "\n\n"
+                      (tools/html->text
+                       (get-content content :encoded)
+                       ;; FIXME: bang in front of URL works only for FF
+                       (str "!" (post :link))) "\n\n"
+                      (footer post) "\n")]
             (log/debug "Text to be posted:" text)
             (merge post
                    {:imgs (get-post-images content :content)
@@ -354,17 +362,20 @@
         nil))))
 
 (defn mresolve
-  "No idea why (resolve sym) doesn't work"
+  "No idea why (resolve sym) doesn't work!"
   [sym]
   (ns-resolve (find-ns 'su.msk.xtalk.wp2ff.core) sym))
+
+(defn name->fn
+  "Find a function for job's action"
+  [action-name job-name]
+  (mresolve (symbol (format "%s-%s" action-name job-name))))
 
 (defn process-feed-job
   "Called from GAE cron job"
   [job]
   (case job
-    ("ff-poll" "wp-poll") (process-feed
-                           (mresolve (symbol (format "fetch-%s"   job)))
-                           (mresolve (symbol (format "process-%s" job))))
+    ("ff-poll" "wp-poll") (process-feed (name->fn "fetch" job) (name->fn "process" job))
     {:status 400
      :body (format "Unknown job type: '%s'" job)}))
 
