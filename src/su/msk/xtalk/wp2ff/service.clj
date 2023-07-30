@@ -7,14 +7,16 @@
             [su.msk.xtalk.wp2ff.tools :as tools])
   (:gen-class))
 
+(defn version []
+  (str (tools/env "GOOGLE_CLOUD_PROJECT" "Standalone wp2ff") ", version " (tools/env "GAE_VERSION" "0.0")))
+
 (defn render-state [request]
   (data/inc-state :web_calls)
   {:status  200
    :headers {"Content-Type" "text/html"}
    :body    (str
              "<html><body>\n"
-             "   <h2>Hello there!</h2>\n" (tools/env "GOOGLE_CLOUD_PROJECT")
-             ", version " (tools/env "GAE_VERSION") " here."
+             "   <h2>Hello there!</h2>\n" (version) "here."
              "   <p>Request was:<br><pre>"
              (with-out-str (clojure.pprint/pprint request)) "</pre></p>\n"
              "   <p>State:<br><pre>"
