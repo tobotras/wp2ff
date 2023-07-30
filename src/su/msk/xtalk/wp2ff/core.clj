@@ -32,10 +32,11 @@
                        {:form-params {:username (CFG :ff-user)
                                       :password (CFG :ff-pass)}
                         :throw-exceptions false})
-        body (json/read-str (res :body))]
-    (if (= (res :status) 200)
-      [{:token (body "authToken")} nil]
-      [nil (body "err")])))
+        {:keys [body status]} res
+        body (json/read-str body :key-fn keyword)]
+    (if (= status 200)
+      [{:token (:authToken body)} nil]
+      [nil (:err body)])))
 
 (defn post-attachment [session filename]
   (try
@@ -44,10 +45,12 @@
                          {:headers {"Authorization" (str "Bearer " token)}
                           :throw-exceptions false
                           :multipart [{:name "file"
-                                       :content (clojure.java.io/file filename)}]})]
-      (if (= (res :status) 200)
-        [(get-in (json/read-str (res :body)) ["attachments" "id"]) nil]
-        [nil ((res :body) "err")]))
+                                       :content (clojure.java.io/file filename)}]})
+          {:keys [status body]} res
+          body (json/read-str body :key-fn keyword)]
+      (if (= status 200)
+        [(get-in body [:attachments :id]) nil]
+        [nil (:err body)]))
     (catch java.io.FileNotFoundException e
       [nil (ex-message e)])))
 
@@ -126,7 +129,10 @@
   (first (get-elements item tag)))
 
 (defn get-content [item tag]
-  (first (get (get-element item tag) :content)))
+  (-> item
+      (get-element tag)
+      (get :content)
+      first))
 
 (defn get-contents [item tag]
   (->> tag
@@ -135,9 +141,9 @@
        (map first)))
 
 (defn strip-query [s]
-  (let [q (clojure.string/index-of s \?)]
-    (if q
-      (subs s 0 q)
+  (let [q-pos (clojure.string/index-of s \?)]
+    (if q-pos
+      (subs s 0 q-pos)
       s)))
 
 (defn cache-locally
@@ -223,11 +229,11 @@
            (get post "attachments"))))
            
 (defn parse-ff-feed [item]
-  (let [body        (get item "posts")
-        attachments (get item "attachments")]
-    (for [item body]
-      (let [post {:link (get item "id")
-                  :text (get item "body")}]
+  (let [body        (:posts item)
+        attachments (:attachments item)]
+    (for [{:keys [id body]} body]
+      (let [post {:link id 
+                  :text body}]
         (when (eligible-ff-post? post)
           (assoc post :imgs (get-ff-images item attachments)))))))
 
@@ -284,15 +290,9 @@
               :user     (tools/env "DB_USER" "wp2ff")
               :password (tools/env "DB_PASS" "wp2ffpass")}))
   
-(defn process-wp-poll [session post]
-  (let [result (when-let [post-result (post-somewhere session post)]
-                 (data/mark-seen post)
-                 post-result)]
-    (cleanup post)
-    (assoc post :state result)))
-
 (defn basic-auth-header [user pass]
-  (->> (str user ":" pass)
+  (->> pass
+       (str user ":")
        .getBytes
        #((Base64/getEncoder) %)
        (str "Basic ")))
@@ -309,6 +309,13 @@
                                                :status "draft"})})]
     (log/debugf "Post result: %s" (ppr res))
     nil))
+
+(defn process-wp-poll [session post]
+  (let [result (when-let [post-result (post-somewhere session post)]
+                 (data/mark-seen post)
+                 post-result)]
+    (cleanup post)
+    (assoc post :state result)))
 
 (defn process-ff-poll [_ post]
   (let [result (when-let [post-result (do-wp-post post)]
@@ -354,7 +361,7 @@
   (let [res (http/get (format "%s/v2/timelines/%s" (CFG :api.root) (CFG :ff-user))
                       {:throw-exceptions false})]
     (if (= (res :status) 200)
-      (let [entries (parse-ff-feed (json/read-str (res :body)))
+      (let [entries (parse-ff-feed (json/read-str (res :body) :key-fn keyword))
             [new-entries old-entries] ((juxt filter remove) nil? entries)]
         (data/inc-state :ff_sessions)
         (data/logf :debug "Fetched %d entries: %d old, %d new"
@@ -389,5 +396,5 @@
   (log/info "wp2ff v0.1, tobotras@gmail.com")
   (configure args)
   (init-db)
-  (log/debug "Set everything, serving")
+  (log/debug "Everything's ready, serving")
   (service/start-web-service (the-config :port) process-feed-job))
