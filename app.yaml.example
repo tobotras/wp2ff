@@ -1,0 +1,13 @@
+runtime: java17
+env: standard
+env_variables:
+  WP_USER: "WP-USER-NAME"
+  WP_PASS: "this is unused"
+  FF_USER: "FF-USER-NAME"
+  FF_PASS: "YOUR-FF-PASSWORD"
+  DW_USER: "DW-USER-NAME"
+  DW_API_KEY: "YOUR-DW-API-KEY"
+  DB_HOST: 10.0.0.3
+entrypoint: java -Xmx64m -jar wp2ff-0.1.0-SNAPSHOT-standalone.jar
+vpc_access_connector:
+ name: projects/wp2ff-gcloud/locations/us-west4/connectors/wp2ff-connector
