@@ -38,25 +38,24 @@
   `(with-out-str (clojure.pprint/pprint ~args)))
 
 (defn img->text [item]
-  (let [attrs (attributes item)]
-    (if (= (:class attrs) "wp-smiley")
-      (:alt attrs)
+  (let [{:keys [class alt]} (attributes item)]
+    (if (= class "wp-smiley")
+      alt
       "")))
 
 (defn item->text [item]
-  (if (vector? item)
-    (let [cont (content item)
-          tag (tag item)]
-      (case tag
-        :p (str (content->text cont) "\n")
-        :em (str "/" (content->text cont) "/")
-        :br "\n"
-        :img (img->text item)
-        (:figure) ""
-        (str "ERR: unknown element <" tag ">")))
-    (if (string? item)
-      item
-      (str "ERR: cannot parse " (type item)))))
+  (cond
+    (vector? item) (let [cont (content item)
+                         tag (tag item)]
+                     (case tag
+                       :p (str (content->text cont) "\n")
+                       :em (str "/" (content->text cont) "/")
+                       :br "\n"
+                       :img (img->text item)
+                       (:figure) ""
+                       (str "ERR: unknown element <" tag ">")))
+    (string? item) item
+    :else (str "ERR: cannot parse " (type item))))
 
 (def ^:dynamic *max-text-size* (* 4 140))
  

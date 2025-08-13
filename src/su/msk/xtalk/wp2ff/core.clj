@@ -67,7 +67,7 @@
   ;; Don't know if it's possible
   true)
 
-(defn ff-api-post [session post attachments]     
+(defn ff-api-post [session post attachments]
   (let [feed (CFG :ff-user)
         req {:post {:body (post :text)
                     :attachments attachments}
@@ -182,7 +182,7 @@
 
 (defn eligible-wp-post? [post]
   (log/debugf "Eligible-wp-post? %s" (ppr post))
-  (and 
+  (and
    (not (data/seen-post? post))
    (or (wp-to-ff-post? post)
        (wp-to-dw-post? post))))
@@ -227,12 +227,12 @@
                              "url")]
                (cache-locally url)))
            (get post "attachments"))))
-           
+
 (defn parse-ff-feed [item]
   (let [body        (:posts item)
         attachments (:attachments item)]
     (for [{:keys [id body]} body]
-      (let [post {:link id 
+      (let [post {:link id
                   :text body}]
         (when (eligible-ff-post? post)
           (assoc post :imgs (get-ff-images item attachments)))))))
@@ -271,32 +271,33 @@
     (when (some #(or (= % "-h") (= % "--help")) args)
       (println "Usage: wp2ff [--dry-run]")
       (System/exit 0))
-    (alter-var-root (var the-config)
-                    (fn [cfg]
-                      (merge cfg
-                             {:wp-feed     (str wp-root "feed/")
-                              :wp-api.root (str wp-root "/wp-json/wp")
-                              :wp-user     wp-user
-                              :wp-pass     wp-pass
-                              :ff-user     ff-user
-                              :ff-pass     ff-pass
-                              :port        port
-                              :dry-run     (some #(= % "--dry-run") args)})))))
-  
+    (alter-var-root
+     (var the-config)
+     (fn [cfg]
+       (merge cfg
+              {:wp-feed     (str wp-root "feed/")
+               :wp-api.root (str wp-root "/wp-json/wp")
+               :wp-user     wp-user
+               :wp-pass     wp-pass
+               :ff-user     ff-user
+               :ff-pass     ff-pass
+               :port        port
+               :dry-run     (some #(= % "--dry-run") args)})))))
+
 (defn init-db []
   (data/init {:dbtype "postgresql"
               :dbname   (tools/env "DB_NAME" "wp2ff")
               :host     (tools/env "DB_HOST" "localhost")
               :user     (tools/env "DB_USER" "wp2ff")
               :password (tools/env "DB_PASS" "wp2ffpass")}))
-  
+
 (defn basic-auth-header [user pass]
   (->> pass
        (str user ":")
        .getBytes
        #((Base64/getEncoder) %)
        (str "Basic ")))
-  
+
 (defn do-wp-post [post]
   (log/debugf "Posting new FF post to WP! Post: %s" (ppr post))
   (let [res (http/post (str (CFG :wp-api.root) "/v2/posts")
@@ -340,20 +341,22 @@
               processed-posts (map #(processor session %) fetched-posts)
               failed-posts (remove #(get % :state) processed-posts)
               done-posts (vec (cset/difference (set processed-posts)
-                                               (set failed-posts)))
-              status (if (empty? failed-posts) (if (empty? done-posts) 200 201) 500)]
-          {:status status
+                                               (set failed-posts)))]
+          {:status (if (empty? failed-posts)
+                     (if (empty? done-posts)
+                       200
+                       201)
+                     500)
            :body (if (empty? processed-posts)
                    "No unseen posts yet"
-                   (str
-                    (when-not (empty? done-posts)
-                      (format "Posted %d posts: %s\n" (count done-posts)
-                              (clojure.string/join
-                               ", " (map #(get % :link) done-posts))))
-                        (when-not (empty? failed-posts)
-                          (format "Failed %d posts: %s\n" (count failed-posts)
-                                  (clojure.string/join
-                                   ", " (map #(get % :link) failed-posts))))))}))
+                   (let [show-posts (fn [posts]
+                                      (when-not (empty? posts)
+                                        (format "Posted %d posts: %s\n" (count posts)
+                                                (clojure.string/join
+                                                 ", " (map :link posts)))))]
+                     (str
+                      (show-posts done-posts)
+                      (show-posts failed-posts))))}))
       (ff-session-error err))))
 
 (defn fetch-ff-poll []
